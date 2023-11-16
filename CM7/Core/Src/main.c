@@ -254,7 +254,7 @@ Error_Handler();
 
     mpu.mag_resolution =  (10.0 * 4912.0 / 8190.0);*/
 
-  for (int i = 0; i < sizeof(gyro_list); i++) {
+  for (int i = 0; i < 3; i++) {
     DBLL_init(&gyro_list[i], n_window);
     DBLL_init(&acce_list[i], n_window);
     DBLL_init(&mag_list[i], n_window);
