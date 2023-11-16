@@ -98,13 +98,13 @@ uint8_t ak8963_WhoAmI = 0;
 uint8_t mpu9250_WhoAmI = 0;
 MPU9250 mpu; //sin1111
 
-osThreadId_t Handle_Action_TractionSetpoint;
+osThreadId_t Handle_Task_Traction;
 osThreadId_t Handle_Task_Steering;
 osThreadId_t Handle_Task_StateMachine;
 osThreadId_t Handle_Task_UART;
 osThreadId_t Handle_Task_MPU9250;
 
-const osThreadAttr_t Attributes_Action_TractionSetpoint = {
+const osThreadAttr_t Attributes_Task_Traction = {
   .name = "Action_TractionSetpoint",
   .stack_size = 128 * 8,
   .priority = (osPriority_t) osPriorityNormal,
@@ -136,7 +136,7 @@ const osThreadAttr_t Attributes_Task_MPU9250 = {
 };
 
 
-static float* traction_setpoint;
+static float traction_setpoint;
 static float delta_steering;
 
 /* USER CODE END PV */
@@ -152,7 +152,7 @@ static void MX_SPI3_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
-void Function_Action_TractionSetpoint(void *argument);
+void Function_Task_Traction(void *argument);
 void Function_Task_Steering(void *argument);
 void Function_Task_StateMachine(void *argument);
 void Function_Task_UART(void *argument);
@@ -290,13 +290,13 @@ Error_Handler();
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-  traction_setpoint = malloc(sizeof(float));
   //float *arg = malloc(sizeof(float));
   /*arg = 0.75f;
   //float starting_traction = 0.75;
-  //Handle_Action_TractionSetpoint = osThreadNew(Function_Action_TractionSetpoint, (void *)arg, &Attributes_Action_TractionSetpoint);
+  //Handle_Task_Traction = osThreadNew(Function_Task_Traction, (void *)arg, &Attributes_Task_Traction);
    */
   Handle_Task_Steering     = osThreadNew(Function_Task_Steering, NULL, &Attributes_Task_Steering);
+  Handle_Task_Traction     = osThreadNew(Function_Task_Traction, NULL, &Attributes_Task_Traction);
   Handle_Task_StateMachine = osThreadNew(Function_Task_StateMachine, NULL, &Attributes_Task_StateMachine);
   Handle_Task_UART         = osThreadNew(Function_Task_UART, NULL, &Attributes_Task_UART);
   Handle_Task_MPU9250      = osThreadNew(Function_Task_MPU9250, NULL, &Attributes_Task_MPU9250);
@@ -645,23 +645,12 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-void Function_Action_TractionSetpoint(void *argument){
-    float setpoint = *((float *)argument);
-
-    //printf("Setpoint: %f\r\n", setpoint);
-    TIM14->CCR1 = (uint32_t)(63999*setpoint);
-
-
-    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-    osDelay(100);
-    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-    osDelay(100);
-    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-	  osDelay(100);
-	  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-	  osDelay(100);
-
-    osThreadTerminate(Handle_Action_TractionSetpoint);
+void Function_Task_Traction(void *argument){
+  for(;;){
+    TIM14->CCR1 = (uint32_t)(63999*traction_setpoint);
+    //printf("Traction: %f\r\n", traction_setpoint);
+    osDelay(50);
+  }
 }
 
 void Function_Task_Steering(void *argument){
@@ -677,8 +666,7 @@ void Function_Task_StateMachine(void *argument){
   for(;;){
     if(state == 0){
         delta_steering = 0.5f;
-        *traction_setpoint = 0.5f;
-	    Handle_Action_TractionSetpoint = osThreadNew(Function_Action_TractionSetpoint, (void *)traction_setpoint, &Attributes_Action_TractionSetpoint);
+        traction_setpoint = 0.5f;
         HAL_GPIO_WritePin(H_IN_1_GPIO_Port, H_IN_1_Pin, GPIO_PIN_RESET);
         osDelay(5000);
         state = 1;
@@ -815,7 +803,7 @@ void StartDefaultTask(void *argument)
 	  setpoint -= 0.1f;
 	  delta -= 0.1f;
   
-	  Handle_Action_TractionSetpoint = osThreadNew(Function_Action_TractionSetpoint, (void *)traction_setpoint, &Attributes_Action_TractionSetpoint);
+	  Handle_Task_Traction = osThreadNew(Function_Task_Traction, (void *)traction_setpoint, &Attributes_Task_Traction);
   }*/
   for(;;){
     osDelay(10000);
