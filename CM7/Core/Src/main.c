@@ -728,9 +728,9 @@ void Function_Task_UART(void *argument){
     /*printf("Accel: %.3f %.3f %.3f\r\n", AccData[0], AccData[1], AccData[2]);
     printf("Gyro: %.3f %.3f %.3f\r\n", GyroData[0], GyroData[1], GyroData[2]);
     printf("Mag: %.3f %.3f %.3ff\r\n", MagData[0], MagData[1],MagData[2]);*/
-    printf("Accel: %.3f %.3f %.3f\r\n", acce_list[0]->mean, acce_list[1]->mean, acce_list[2]->mean);
-    printf("Gyro: %.3f %.3f %.3f\r\n", gyro_list[0]->mean, gyro_list[1]->mean, gyro_list[2]->mean);
-    printf("Mag: %.3f %.3f %.3ff\r\n", mag_list[0]->mean, mag_list[1]->mean,mag_list[2]->mean);
+    printf("Accel: %.3f %.3f %.3f\r\n", acce_list[0].mean, acce_list[1].mean, acce_list[2].mean);
+    printf("Gyro: %.3f %.3f %.3f\r\n", gyro_list[0].mean, gyro_list[1].mean, gyro_list[2].mean);
+    printf("Mag: %.3f %.3f %.3ff\r\n", mag_list[0].mean, mag_list[1].mean,mag_list[2].mean);
     osDelay(100);
   }
 }
@@ -760,9 +760,9 @@ void Function_Task_MPU9250(void *argument){
 	MPU9250_ReadGyro(&mpu);
 	MPU9250_ReadMag(&mpu);
 
-  push_back(&acc_list[0], mpu.mpu_data.Accel[0] - AccOffset[0]);
-  push_back(&acc_list[1], mpu.mpu_data.Accel[1] - AccOffset[1]);
-  push_back(&acc_list[2], mpu.mpu_data.Accel[2] - AccOffset[2]);
+  push_back(&acce_list[0], mpu.mpu_data.Accel[0] - AccOffset[0]);
+  push_back(&acce_list[1], mpu.mpu_data.Accel[1] - AccOffset[1]);
+  push_back(&acce_list[2], mpu.mpu_data.Accel[2] - AccOffset[2]);
   push_back(&gyro_list[0], mpu.mpu_data.Gyro[0] - GyroOffset[0]);
   push_back(&gyro_list[1], mpu.mpu_data.Gyro[1] - GyroOffset[1]);
   push_back(&gyro_list[2], mpu.mpu_data.Gyro[2] - GyroOffset[2]);
@@ -821,13 +821,6 @@ void calibrate_MPU9250(SPI_HandleTypeDef *spi){
   MagOffset[1] = MagAccum[1] / num_samples;
   MagOffset[2] = MagAccum[2] / num_samples;
 
-}
-
-void initDoubleLinkedList(struct doubleLinkedList* list[], int n){
-  for(int i = 0; i < n; i++){
-    //list[i] = malloc(sizeof(struct doubleLinkedList));
-    DBLL_init(&list[i], n_window);
-  }
 }
 
 /* USER CODE END 4 */
