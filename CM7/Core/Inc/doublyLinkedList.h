@@ -17,8 +17,8 @@ struct Node {
 struct doubleLinkedList {
     int size;
     int maxSize;
-    int currSum;
-    int mean;
+    double currSum;
+    double mean;
     struct Node* head;
     struct Node* tail;
 };

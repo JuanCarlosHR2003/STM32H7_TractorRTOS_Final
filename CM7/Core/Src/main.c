@@ -254,9 +254,11 @@ Error_Handler();
 
     mpu.mag_resolution =  (10.0 * 4912.0 / 8190.0);*/
 
-  initDoubleLinkedList(&gyro_list, n_window);
-  initDoubleLinkedList(&acce_list, n_window);
-  initDoubleLinkedList(&mag_list, n_window);
+  for (int i = 0; i < sizeof(gyro_list); i++) {
+    DBLL_init(&gyro_list[i], n_window);
+    DBLL_init(&acce_list[i], n_window);
+    DBLL_init(&mag_list[i], n_window);
+  }
 
   MPU9250_Init(&mpu);
   printf("Calibrating MPU...\r\n");

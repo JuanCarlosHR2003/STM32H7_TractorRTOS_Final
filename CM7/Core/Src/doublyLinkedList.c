@@ -55,7 +55,7 @@ void push_back(struct doubleLinkedList* list, double data) {
     
     list->size++;
     list->currSum += data;
-    list->mean = list->currSum / list->size;
+    list->mean = list->currSum / (double)list->size;
 }
 
 
@@ -65,8 +65,8 @@ void traverse(struct doubleLinkedList* list) {
     }
     struct Node* node = list->head;
     while (node != NULL) {
-        printf("%d,", node->data);
+        printf("%f,", node->data);
         node = node->next;
     }
-    printf("%f\n", (float) list->currSum / (float) list->maxSize);
+    printf("%f\n", list->mean);
 }
