@@ -25,6 +25,7 @@
 #include "myprintf.h"
 //#include "MPU9250.h"
 #include "mpu9250.h"
+#include "doublyLinkedList.h"
 
 /* USER CODE END Includes */
 
@@ -65,7 +66,7 @@ const osThreadAttr_t defaultTask_attributes = {
 };
 /* USER CODE BEGIN PV */
 
-float AccData[3], GyroData[3], MagData[3];
+//float AccData[3], GyroData[3], MagData[3];
 // Calibration offsets
 float AccOffset[3] = {0.0f, 0.0f, 0.0f};
 float GyroOffset[3] = {0.0f, 0.0f, 0.0f};
@@ -93,6 +94,11 @@ float MagOffset[3] = {0.0f, 0.0f, 0.0f};
 mpu9250_t mpu;*/ //Desertkun
 
 // mpu9250 mpu; // Danny
+
+struct doubleLinkedList gyro_list[3];
+struct doubleLinkedList acce_list[3];
+struct doubleLinkedList mag_list[3];
+int n_window = 10;
 
 uint8_t ak8963_WhoAmI = 0;
 uint8_t mpu9250_WhoAmI = 0;
@@ -158,6 +164,7 @@ void Function_Task_StateMachine(void *argument);
 void Function_Task_UART(void *argument);
 void Function_Task_MPU9250(void *argument);
 void calibrate_MPU9250(SPI_HandleTypeDef *spi);
+void initDoubleLinkedList(struct doubleLinkedList* list[], int n);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -246,6 +253,10 @@ Error_Handler();
     mpu9250_set_gyro_resolution( &mpu, GYRO_RESOLUTION_2000DPS);
 
     mpu.mag_resolution =  (10.0 * 4912.0 / 8190.0);*/
+
+  initDoubleLinkedList(&gyro_list, n_window);
+  initDoubleLinkedList(&acce_list, n_window);
+  initDoubleLinkedList(&mag_list, n_window);
 
   MPU9250_Init(&mpu);
   printf("Calibrating MPU...\r\n");
@@ -710,11 +721,14 @@ void Function_Task_UART(void *argument){
     printf("Gyro: %.2f %.2f %.2f\r\n", mpu.gyro_x, mpu.gyro_y, mpu.gyro_z);
     printf("Mag: %.2f %.2f %.2f\r\n", mpu.mag_x, mpu.mag_y, mpu.mag_z);*/
     /*printf("Accel: %d %d %d\r\n", AccData[0], AccData[1], AccData[2]);
-	printf("Gyro: %d %d %d\r\n", GyroData[0], GyroData[1], GyroData[2]);
-	printf("Mag: %d %d %df\r\n", MagData[0], MagData[1],MagData[2]);*/
-    printf("Accel: %.3f %.3f %.3f\r\n", AccData[0], AccData[1], AccData[2]);
-    	printf("Gyro: %.3f %.3f %.3f\r\n", GyroData[0], GyroData[1], GyroData[2]);
-    	printf("Mag: %.3f %.3f %.3ff\r\n", MagData[0], MagData[1],MagData[2]);
+	  printf("Gyro: %d %d %d\r\n", GyroData[0], GyroData[1], GyroData[2]);
+	  printf("Mag: %d %d %df\r\n", MagData[0], MagData[1],MagData[2]);*/
+    /*printf("Accel: %.3f %.3f %.3f\r\n", AccData[0], AccData[1], AccData[2]);
+    printf("Gyro: %.3f %.3f %.3f\r\n", GyroData[0], GyroData[1], GyroData[2]);
+    printf("Mag: %.3f %.3f %.3ff\r\n", MagData[0], MagData[1],MagData[2]);*/
+    printf("Accel: %.3f %.3f %.3f\r\n", acce_list[0]->mean, acce_list[1]->mean, acce_list[2]->mean);
+    printf("Gyro: %.3f %.3f %.3f\r\n", gyro_list[0]->mean, gyro_list[1]->mean, gyro_list[2]->mean);
+    printf("Mag: %.3f %.3f %.3ff\r\n", mag_list[0]->mean, mag_list[1]->mean,mag_list[2]->mean);
     osDelay(100);
   }
 }
@@ -744,6 +758,18 @@ void Function_Task_MPU9250(void *argument){
 	MPU9250_ReadGyro(&mpu);
 	MPU9250_ReadMag(&mpu);
 
+  push_back(&acc_list[0], mpu.mpu_data.Accel[0] - AccOffset[0]);
+  push_back(&acc_list[1], mpu.mpu_data.Accel[1] - AccOffset[1]);
+  push_back(&acc_list[2], mpu.mpu_data.Accel[2] - AccOffset[2]);
+  push_back(&gyro_list[0], mpu.mpu_data.Gyro[0] - GyroOffset[0]);
+  push_back(&gyro_list[1], mpu.mpu_data.Gyro[1] - GyroOffset[1]);
+  push_back(&gyro_list[2], mpu.mpu_data.Gyro[2] - GyroOffset[2]);
+  push_back(&mag_list[0], mpu.mpu_data.Magn[0] - MagOffset[0]);
+  push_back(&mag_list[1], mpu.mpu_data.Magn[1] - MagOffset[1]);
+  push_back(&mag_list[2], mpu.mpu_data.Magn[2] - MagOffset[2]);
+
+
+  /*
 	AccData[0] = mpu.mpu_data.Accel[0] - AccOffset[0];
   AccData[1] = mpu.mpu_data.Accel[1] - AccOffset[1];
   AccData[2] = mpu.mpu_data.Accel[2] - AccOffset[2];
@@ -753,6 +779,7 @@ void Function_Task_MPU9250(void *argument){
   MagData[0] = mpu.mpu_data.Magn[0] - MagOffset[0];
   MagData[1] = mpu.mpu_data.Magn[1] - MagOffset[1];
   MagData[2] = mpu.mpu_data.Magn[2] - MagOffset[2];
+  */
 
   osDelay(50);
   }
@@ -792,6 +819,13 @@ void calibrate_MPU9250(SPI_HandleTypeDef *spi){
   MagOffset[1] = MagAccum[1] / num_samples;
   MagOffset[2] = MagAccum[2] / num_samples;
 
+}
+
+void initDoubleLinkedList(struct doubleLinkedList* list[], int n){
+  for(int i = 0; i < n; i++){
+    //list[i] = malloc(sizeof(struct doubleLinkedList));
+    DBLL_init(&list[i], n_window);
+  }
 }
 
 /* USER CODE END 4 */
