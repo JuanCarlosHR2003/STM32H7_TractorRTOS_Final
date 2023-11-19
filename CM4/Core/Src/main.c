@@ -22,7 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "MY_NRF24.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -47,6 +47,8 @@
 
 FDCAN_HandleTypeDef hfdcan1;
 
+SPI_HandleTypeDef hspi1;
+
 UART_HandleTypeDef huart3;
 
 /* Definitions for defaultTask */
@@ -67,23 +69,57 @@ const osThreadAttr_t Attributes_Task_IndicatorLED = {
 };
 uint8_t indicator_mode = 1;
 
+osThreadId_t Handle_Task_Wireless;
+
+const osThreadAttr_t Attributes_Task_Wireless = {
+  .name = "Task_Wireless",
+  .stack_size = 128 * 8,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+
+osThreadId_t Handle_Task_CAN;
+
+const osThreadAttr_t Attributes_Task_CAN = {
+  .name = "Task_CAN",
+  .stack_size = 128 * 8,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 static void MX_GPIO_Init(void);
 static void MX_FDCAN1_Init(void);
+static void MX_SPI1_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 
 void Function_Task_IndicatorLED(void *argument);
+void Function_Task_Wireless(void *argument);
+void Function_Task_CAN(void *argument);
+
+void setup_NRF(void);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+uint64_t RxpipeAddrs = 0x11223344AA;
+uint8_t myRxData[50];
+char myAckPayload[32] = "Ack by STMF7!";
 
+
+
+FDCAN_FilterTypeDef sFilterConfig;
+FDCAN_TxHeaderTypeDef TxHeader;
+FDCAN_RxHeaderTypeDef RxHeader;
+uint8_t *const RxData[8] = (uint8_t *)0x30000000;
+osMutexId_t *const mutex_id_CAN = (osMutexId_t *)0x3000000C;
+osMutexId_t *const mutex_id_Wireless = (osMutexId_t *)0x3000001C;
+uint16_t *const x = (uint8_t *)0x30000030;
+uint16_t *const y = (uint8_t *)0x30000040;
+uint16_t *const z = (uint8_t *)0x30000050;
 /* USER CODE END 0 */
 
 /**
@@ -127,8 +163,10 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_FDCAN1_Init();
+  MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-
+  MX_USART3_UART_Init();
+  setup_NRF();
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -158,7 +196,8 @@ int main(void)
   /* add threads, ... */
 
   Handle_Task_IndicatorLED       = osThreadNew(Function_Task_IndicatorLED,       NULL,        &Attributes_Task_IndicatorLED);
-
+  Handle_Task_Wireless      = osThreadNew(Function_Task_Wireless,       NULL,        &Attributes_Task_Wireless);
+  Handle_Task_CAN      = osThreadNew(Function_Task_CAN,       NULL,        &Attributes_Task_CAN);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -273,6 +312,54 @@ static void MX_FDCAN1_Init(void)
 }
 
 /**
+  * @brief SPI1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI1_Init(void)
+{
+
+  /* USER CODE BEGIN SPI1_Init 0 */
+
+  /* USER CODE END SPI1_Init 0 */
+
+  /* USER CODE BEGIN SPI1_Init 1 */
+
+  /* USER CODE END SPI1_Init 1 */
+  /* SPI1 parameter configuration*/
+  hspi1.Instance = SPI1;
+  hspi1.Init.Mode = SPI_MODE_MASTER;
+  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
+  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi1.Init.CRCPolynomial = 0x0;
+  hspi1.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  hspi1.Init.NSSPolarity = SPI_NSS_POLARITY_LOW;
+  hspi1.Init.FifoThreshold = SPI_FIFO_THRESHOLD_01DATA;
+  hspi1.Init.TxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
+  hspi1.Init.RxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
+  hspi1.Init.MasterSSIdleness = SPI_MASTER_SS_IDLENESS_00CYCLE;
+  hspi1.Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
+  hspi1.Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
+  hspi1.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_DISABLE;
+  hspi1.Init.IOSwap = SPI_IO_SWAP_DISABLE;
+  if (HAL_SPI_Init(&hspi1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI1_Init 2 */
+
+  /* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
   * @brief USART3 Initialization Function
   * @param None
   * @retval None
@@ -331,10 +418,21 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_6|GPIO_PIN_7, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : PC6 PC7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LD2_Pin */
   GPIO_InitStruct.Pin = LD2_Pin;
@@ -372,6 +470,48 @@ void Function_Task_IndicatorLED(void *argument){
 	  	  }
 	  }
   }
+}
+
+
+void Function_Task_Wireless(void *argument){
+	for(;;){
+    NRF24_read(myRxData, 32);
+    osMutexAcquire(mutex_id_Wireless, 1000);
+    x = ((uint16_t)myRxData[0] <<8) | (uint16_t)myRxData[1];
+    y = ((uint16_t)myRxData[2] <<8) | (uint16_t)myRxData[3];
+	z = ((uint16_t)myRxData[4] <<8) | (uint16_t)myRxData[5];
+    osMutexRelease(mutex_id_Wireless);
+
+	printf("X: %u, Y: %u, °:%u\r\n", x, y,z);
+	osDelay(1000);
+  }
+}
+
+void Function_Task_CAN(void *argument){
+	for(;;){
+		osMutexAcquire(mutex_id_CAN, 1000);
+		HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData);
+		osMutexRelease(mutex_id_CAN);
+		osDelay(100);
+	}
+}
+
+void setup_NRF(void){
+	//Configure CSN and CE pins
+	NRF24_begin(GPIOC, GPIO_PIN_6, GPIO_PIN_7, hspi1);
+	nrf24_DebugUART_Init(huart3);
+
+	//Configure NRF settings
+	 NRF24_setAutoAck(false);
+	  NRF24_setChannel(52);
+	  NRF24_setPayloadSize(32);
+	  NRF24_setDataRate(RF24_2MBPS);
+	  NRF24_openReadingPipe(0, RxpipeAddrs);
+	  NRF24_enableDynamicPayloads();
+	  printRadioSettings();
+
+	  //Configure NRF to be receiver
+	  NRF24_startListening();
 }
 
 /* USER CODE END 4 */
