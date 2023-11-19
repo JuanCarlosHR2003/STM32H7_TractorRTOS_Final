@@ -22,9 +22,11 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <math.h>
 #include "myprintf.h"
 //#include "MPU9250.h"
 #include "mpu9250.h"
+#include "doublyLinkedList.h"
 
 /* USER CODE END Includes */
 
@@ -65,7 +67,7 @@ const osThreadAttr_t defaultTask_attributes = {
 };
 /* USER CODE BEGIN PV */
 
-float AccData[3], GyroData[3], MagData[3];
+//float AccData[3], GyroData[3], MagData[3];
 // Calibration offsets
 float AccOffset[3] = {0.0f, 0.0f, 0.0f};
 float GyroOffset[3] = {0.0f, 0.0f, 0.0f};
@@ -94,17 +96,22 @@ mpu9250_t mpu;*/ //Desertkun
 
 // mpu9250 mpu; // Danny
 
+struct doubleLinkedList gyro_list[3];
+struct doubleLinkedList acce_list[3];
+struct doubleLinkedList mag_list[3];
+int n_window = 25;
+
 uint8_t ak8963_WhoAmI = 0;
 uint8_t mpu9250_WhoAmI = 0;
 MPU9250 mpu; //sin1111
 
-osThreadId_t Handle_Action_TractionSetpoint;
+osThreadId_t Handle_Task_Traction;
 osThreadId_t Handle_Task_Steering;
 osThreadId_t Handle_Task_StateMachine;
 osThreadId_t Handle_Task_UART;
 osThreadId_t Handle_Task_MPU9250;
 
-const osThreadAttr_t Attributes_Action_TractionSetpoint = {
+const osThreadAttr_t Attributes_Task_Traction = {
   .name = "Action_TractionSetpoint",
   .stack_size = 128 * 8,
   .priority = (osPriority_t) osPriorityNormal,
@@ -136,7 +143,7 @@ const osThreadAttr_t Attributes_Task_MPU9250 = {
 };
 
 
-static float* traction_setpoint;
+static float traction_setpoint;
 static float delta_steering;
 
 /* USER CODE END PV */
@@ -152,12 +159,13 @@ static void MX_SPI3_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
-void Function_Action_TractionSetpoint(void *argument);
+void Function_Task_Traction(void *argument);
 void Function_Task_Steering(void *argument);
 void Function_Task_StateMachine(void *argument);
 void Function_Task_UART(void *argument);
 void Function_Task_MPU9250(void *argument);
 void calibrate_MPU9250(SPI_HandleTypeDef *spi);
+void initDoubleLinkedList(struct doubleLinkedList* list[], int n);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -247,14 +255,20 @@ Error_Handler();
 
     mpu.mag_resolution =  (10.0 * 4912.0 / 8190.0);*/
 
+  for (int i = 0; i < 3; i++) {
+    DBLL_init(&gyro_list[i], n_window);
+    DBLL_init(&acce_list[i], n_window);
+    DBLL_init(&mag_list[i], n_window);
+  }
+
   MPU9250_Init(&mpu);
-  printf("Calibrating MPU...\r\n");
+  //printf("Calibrating MPU...\r\n");
   calibrate_MPU9250(&MPU_SPI);
-  printf("Calibration complete!\r\n");
+  /*printf("Calibration complete!\r\n");
   printf("Calibration offsets:\r\n");
   printf("Accel: %.2f %.2f %.2f\r\n", AccOffset[0], AccOffset[1], AccOffset[2]);
   printf("Gyro: %.2f %.2f %.2f\r\n", GyroOffset[0], GyroOffset[1], GyroOffset[2]);
-  printf("Mag: %.2f %.2f %.2f\r\n", MagOffset[0], MagOffset[1], MagOffset[2]);
+  printf("Mag: %.2f %.2f %.2f\r\n", MagOffset[0], MagOffset[1], MagOffset[2]);*/
   HAL_Delay(2000);
 
 
@@ -290,13 +304,13 @@ Error_Handler();
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-  traction_setpoint = malloc(sizeof(float));
   //float *arg = malloc(sizeof(float));
   /*arg = 0.75f;
   //float starting_traction = 0.75;
-  //Handle_Action_TractionSetpoint = osThreadNew(Function_Action_TractionSetpoint, (void *)arg, &Attributes_Action_TractionSetpoint);
+  //Handle_Task_Traction = osThreadNew(Function_Task_Traction, (void *)arg, &Attributes_Task_Traction);
    */
   Handle_Task_Steering     = osThreadNew(Function_Task_Steering, NULL, &Attributes_Task_Steering);
+  Handle_Task_Traction     = osThreadNew(Function_Task_Traction, NULL, &Attributes_Task_Traction);
   Handle_Task_StateMachine = osThreadNew(Function_Task_StateMachine, NULL, &Attributes_Task_StateMachine);
   Handle_Task_UART         = osThreadNew(Function_Task_UART, NULL, &Attributes_Task_UART);
   Handle_Task_MPU9250      = osThreadNew(Function_Task_MPU9250, NULL, &Attributes_Task_MPU9250);
@@ -645,23 +659,12 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-void Function_Action_TractionSetpoint(void *argument){
-    float setpoint = *((float *)argument);
-
-    //printf("Setpoint: %f\r\n", setpoint);
-    TIM14->CCR1 = (uint32_t)(63999*setpoint);
-
-
-    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-    osDelay(100);
-    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-    osDelay(100);
-    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-	  osDelay(100);
-	  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-	  osDelay(100);
-
-    osThreadTerminate(Handle_Action_TractionSetpoint);
+void Function_Task_Traction(void *argument){
+  for(;;){
+    TIM14->CCR1 = (uint32_t)(63999*traction_setpoint);
+    //printf("Traction: %f\r\n", traction_setpoint);
+    osDelay(50);
+  }
 }
 
 void Function_Task_Steering(void *argument){
@@ -677,8 +680,7 @@ void Function_Task_StateMachine(void *argument){
   for(;;){
     if(state == 0){
         delta_steering = 0.5f;
-        *traction_setpoint = 0.5f;
-	    Handle_Action_TractionSetpoint = osThreadNew(Function_Action_TractionSetpoint, (void *)traction_setpoint, &Attributes_Action_TractionSetpoint);
+        traction_setpoint = 0.5f;
         HAL_GPIO_WritePin(H_IN_1_GPIO_Port, H_IN_1_Pin, GPIO_PIN_RESET);
         osDelay(5000);
         state = 1;
@@ -703,19 +705,34 @@ void Function_Task_StateMachine(void *argument){
 }
 
 void Function_Task_UART(void *argument){
-  for(;;){
+
+double angAcc = 0, angGyro = 0, angPond = 0, time_sample = 0.05, alpha = 0.1;
+	for(;;){
+
     HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
-    printf("Hello World!\r\n");
+    //printf("Hello World!\r\n");
     /*printf("Accel: %.2f %.2f %.2f\r\n", mpu.accel_x, mpu.accel_y, mpu.accel_z);
     printf("Gyro: %.2f %.2f %.2f\r\n", mpu.gyro_x, mpu.gyro_y, mpu.gyro_z);
     printf("Mag: %.2f %.2f %.2f\r\n", mpu.mag_x, mpu.mag_y, mpu.mag_z);*/
     /*printf("Accel: %d %d %d\r\n", AccData[0], AccData[1], AccData[2]);
-	printf("Gyro: %d %d %d\r\n", GyroData[0], GyroData[1], GyroData[2]);
-	printf("Mag: %d %d %df\r\n", MagData[0], MagData[1],MagData[2]);*/
-    printf("Accel: %.3f %.3f %.3f\r\n", AccData[0], AccData[1], AccData[2]);
-    	printf("Gyro: %.3f %.3f %.3f\r\n", GyroData[0], GyroData[1], GyroData[2]);
-    	printf("Mag: %.3f %.3f %.3ff\r\n", MagData[0], MagData[1],MagData[2]);
-    osDelay(100);
+	  printf("Gyro: %d %d %d\r\n", GyroData[0], GyroData[1], GyroData[2]);
+	  printf("Mag: %d %d %df\r\n", MagData[0], MagData[1],MagData[2]);*/
+    /*printf("Accel: %.3f %.3f %.3f\r\n", AccData[0], AccData[1], AccData[2]);
+    printf("Gyro: %.3f %.3f %.3f\r\n", GyroData[0], GyroData[1], GyroData[2]);
+    printf("Mag: %.3f %.3f %.3ff\r\n", MagData[0], MagData[1],MagData[2]);*/
+    //printf("%.3f %.3f %.3f", acce_list[0].mean, acce_list[1].mean, acce_list[2].mean);
+    //printf(" %.3f %.3f %.3f", gyro_list[0].mean, gyro_list[1].mean, gyro_list[2].mean);
+    //printf("%.3f %.3f %.3f\r\n", mag_list[0].mean, mag_list[1].mean,mag_list[2].mean);
+
+    angAcc = (180*atan((acce_list[1].mean/acce_list[0].mean)))/ (M_PI);
+    angGyro = (gyro_list[0].mean * time_sample) + angPond;
+    angPond = (angAcc * alpha) + (angGyro * (1 - alpha));
+
+    //angPond = (angPond < 0) ? angPond + 360.0 : (angPond > 360.0) ? angPond - 360.0 : angPond;
+
+
+    printf("%.3f %.3f %.3f\r\n",angPond, angAcc, angGyro);
+    osDelay(50);
   }
 }
 
@@ -744,6 +761,18 @@ void Function_Task_MPU9250(void *argument){
 	MPU9250_ReadGyro(&mpu);
 	MPU9250_ReadMag(&mpu);
 
+	  push_back(&acce_list[0], mpu.mpu_data.Accel[0] - AccOffset[0]);
+	  push_back(&acce_list[1], mpu.mpu_data.Accel[1] - AccOffset[1]);
+	  push_back(&acce_list[2], mpu.mpu_data.Accel[2] - AccOffset[2]);
+	  push_back(&gyro_list[0], mpu.mpu_data.Gyro[0] - GyroOffset[0]);
+	  push_back(&gyro_list[1], mpu.mpu_data.Gyro[1] - GyroOffset[1]);
+	  push_back(&gyro_list[2], mpu.mpu_data.Gyro[2] - GyroOffset[2]);
+	  //push_back(&mag_list[0], mpu.mpu_data.Magn[0] - MagOffset[0]);
+	  //push_back(&mag_list[1], mpu.mpu_data.Magn[1] - MagOffset[1]);
+	  //push_back(&mag_list[2], mpu.mpu_data.Magn[2] - MagOffset[2]);
+
+
+  /*
 	AccData[0] = mpu.mpu_data.Accel[0] - AccOffset[0];
   AccData[1] = mpu.mpu_data.Accel[1] - AccOffset[1];
   AccData[2] = mpu.mpu_data.Accel[2] - AccOffset[2];
@@ -753,6 +782,7 @@ void Function_Task_MPU9250(void *argument){
   MagData[0] = mpu.mpu_data.Magn[0] - MagOffset[0];
   MagData[1] = mpu.mpu_data.Magn[1] - MagOffset[1];
   MagData[2] = mpu.mpu_data.Magn[2] - MagOffset[2];
+  */
 
   osDelay(50);
   }
@@ -815,7 +845,7 @@ void StartDefaultTask(void *argument)
 	  setpoint -= 0.1f;
 	  delta -= 0.1f;
   
-	  Handle_Action_TractionSetpoint = osThreadNew(Function_Action_TractionSetpoint, (void *)traction_setpoint, &Attributes_Action_TractionSetpoint);
+	  Handle_Task_Traction = osThreadNew(Function_Task_Traction, (void *)traction_setpoint, &Attributes_Task_Traction);
   }*/
   for(;;){
     osDelay(10000);
