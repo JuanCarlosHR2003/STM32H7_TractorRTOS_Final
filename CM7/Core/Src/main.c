@@ -22,6 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <math.h>
 #include "myprintf.h"
 //#include "MPU9250.h"
 #include "mpu9250.h"
@@ -98,7 +99,7 @@ mpu9250_t mpu;*/ //Desertkun
 struct doubleLinkedList gyro_list[3];
 struct doubleLinkedList acce_list[3];
 struct doubleLinkedList mag_list[3];
-int n_window = 10;
+int n_window = 25;
 
 uint8_t ak8963_WhoAmI = 0;
 uint8_t mpu9250_WhoAmI = 0;
@@ -261,13 +262,13 @@ Error_Handler();
   }
 
   MPU9250_Init(&mpu);
-  printf("Calibrating MPU...\r\n");
+  //printf("Calibrating MPU...\r\n");
   calibrate_MPU9250(&MPU_SPI);
-  printf("Calibration complete!\r\n");
+  /*printf("Calibration complete!\r\n");
   printf("Calibration offsets:\r\n");
   printf("Accel: %.2f %.2f %.2f\r\n", AccOffset[0], AccOffset[1], AccOffset[2]);
   printf("Gyro: %.2f %.2f %.2f\r\n", GyroOffset[0], GyroOffset[1], GyroOffset[2]);
-  printf("Mag: %.2f %.2f %.2f\r\n", MagOffset[0], MagOffset[1], MagOffset[2]);
+  printf("Mag: %.2f %.2f %.2f\r\n", MagOffset[0], MagOffset[1], MagOffset[2]);*/
   HAL_Delay(2000);
 
 
@@ -716,9 +717,12 @@ void Function_Task_StateMachine(void *argument){
 }
 
 void Function_Task_UART(void *argument){
-  for(;;){
+
+double angAcc = 0, angGyro = 0, angPond = 0, time_sample = 0.05, alpha = 0.1;
+	for(;;){
+
     HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
-    printf("Hello World!\r\n");
+    //printf("Hello World!\r\n");
     /*printf("Accel: %.2f %.2f %.2f\r\n", mpu.accel_x, mpu.accel_y, mpu.accel_z);
     printf("Gyro: %.2f %.2f %.2f\r\n", mpu.gyro_x, mpu.gyro_y, mpu.gyro_z);
     printf("Mag: %.2f %.2f %.2f\r\n", mpu.mag_x, mpu.mag_y, mpu.mag_z);*/
@@ -728,10 +732,19 @@ void Function_Task_UART(void *argument){
     /*printf("Accel: %.3f %.3f %.3f\r\n", AccData[0], AccData[1], AccData[2]);
     printf("Gyro: %.3f %.3f %.3f\r\n", GyroData[0], GyroData[1], GyroData[2]);
     printf("Mag: %.3f %.3f %.3ff\r\n", MagData[0], MagData[1],MagData[2]);*/
-    printf("Accel: %.3f %.3f %.3f\r\n", acce_list[0].mean, acce_list[1].mean, acce_list[2].mean);
-    printf("Gyro: %.3f %.3f %.3f\r\n", gyro_list[0].mean, gyro_list[1].mean, gyro_list[2].mean);
-    printf("Mag: %.3f %.3f %.3ff\r\n", mag_list[0].mean, mag_list[1].mean,mag_list[2].mean);
-    osDelay(100);
+    //printf("%.3f %.3f %.3f", acce_list[0].mean, acce_list[1].mean, acce_list[2].mean);
+    //printf(" %.3f %.3f %.3f", gyro_list[0].mean, gyro_list[1].mean, gyro_list[2].mean);
+    //printf("%.3f %.3f %.3f\r\n", mag_list[0].mean, mag_list[1].mean,mag_list[2].mean);
+
+    angAcc = (180*atan((acce_list[1].mean/acce_list[0].mean)))/ (M_PI);
+    angGyro = (gyro_list[0].mean * time_sample) + angPond;
+    angPond = (angAcc * alpha) + (angGyro * (1 - alpha));
+
+    //angPond = (angPond < 0) ? angPond + 360.0 : (angPond > 360.0) ? angPond - 360.0 : angPond;
+
+
+    printf("%.3f %.3f %.3f\r\n",angPond, angAcc, angGyro);
+    osDelay(50);
   }
 }
 
@@ -760,15 +773,15 @@ void Function_Task_MPU9250(void *argument){
 	MPU9250_ReadGyro(&mpu);
 	MPU9250_ReadMag(&mpu);
 
-  push_back(&acce_list[0], mpu.mpu_data.Accel[0] - AccOffset[0]);
-  push_back(&acce_list[1], mpu.mpu_data.Accel[1] - AccOffset[1]);
-  push_back(&acce_list[2], mpu.mpu_data.Accel[2] - AccOffset[2]);
-  push_back(&gyro_list[0], mpu.mpu_data.Gyro[0] - GyroOffset[0]);
-  push_back(&gyro_list[1], mpu.mpu_data.Gyro[1] - GyroOffset[1]);
-  push_back(&gyro_list[2], mpu.mpu_data.Gyro[2] - GyroOffset[2]);
-  push_back(&mag_list[0], mpu.mpu_data.Magn[0] - MagOffset[0]);
-  push_back(&mag_list[1], mpu.mpu_data.Magn[1] - MagOffset[1]);
-  push_back(&mag_list[2], mpu.mpu_data.Magn[2] - MagOffset[2]);
+	  push_back(&acce_list[0], mpu.mpu_data.Accel[0] - AccOffset[0]);
+	  push_back(&acce_list[1], mpu.mpu_data.Accel[1] - AccOffset[1]);
+	  push_back(&acce_list[2], mpu.mpu_data.Accel[2] - AccOffset[2]);
+	  push_back(&gyro_list[0], mpu.mpu_data.Gyro[0] - GyroOffset[0]);
+	  push_back(&gyro_list[1], mpu.mpu_data.Gyro[1] - GyroOffset[1]);
+	  push_back(&gyro_list[2], mpu.mpu_data.Gyro[2] - GyroOffset[2]);
+	  //push_back(&mag_list[0], mpu.mpu_data.Magn[0] - MagOffset[0]);
+	  //push_back(&mag_list[1], mpu.mpu_data.Magn[1] - MagOffset[1]);
+	  //push_back(&mag_list[2], mpu.mpu_data.Magn[2] - MagOffset[2]);
 
 
   /*
