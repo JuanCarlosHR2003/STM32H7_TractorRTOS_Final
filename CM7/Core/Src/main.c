@@ -68,57 +68,43 @@ const osThreadAttr_t defaultTask_attributes = {
 };
 /* USER CODE BEGIN PV */
 
-//float AccData[3], GyroData[3], MagData[3];
-// Calibration offsets
+// Global variables
 float AccOffset[3] = {0.0f, 0.0f, 0.0f};
 float GyroOffset[3] = {0.0f, 0.0f, 0.0f};
 float MagOffset[3] = {0.0f, 0.0f, 0.0f};
-
-/*typedef struct mpu9250_t{
-  int16_t accel_x;
-  int16_t accel_y;
-  int16_t accel_z;
-  int16_t gyro_x;
-  int16_t gyro_y;
-  int16_t gyro_z;
-  int16_t mag_x;
-  int16_t mag_y;
-  int16_t mag_z;
-  float temp;
-  float accel_resolution;
-  float gyro_resolution;
-  float mag_resolution;
-  GPIO_TypeDef* cs_gpio_port;
-  uint16_t cs_gpio_pin;
-  SPI_HandleTypeDef* hspi;
-} mpu9250_t;
-
-mpu9250_t mpu;*/ //Desertkun
-
-// mpu9250 mpu; // Danny
-
 struct doubleLinkedList gyro_list[3];
 struct doubleLinkedList acce_list[3];
 struct doubleLinkedList mag_list[3];
 int n_window = 10;
 
-float robot_angle = 0.0;
-
-float imu_pos_x = 0.0;
-float imu_pos_y = 0.0;
-
-float imu_vel_x = 0.0;
-float imu_vel_y = 0.0;
-
 uint8_t ak8963_WhoAmI = 0;
 uint8_t mpu9250_WhoAmI = 0;
-MPU9250 mpu; //sin1111
+MPU9250 mpu;
+
+// State variables
+float u = 0.2;   // Longitudinal velocity
+float v = 0.0;   // Lateral velocity
+float x = 0.01;   // X position
+float y = 0.01;   // Y position
+float psi = 0; // Global yaw angle
+
+// Stanley variables
+float x1_desired = 0; // Desired x coordinate of the start of the ref line
+float y1_desired = 0; // Desired y coordinate of the start of the ref line
+float x2_desired = 40; // Desired x coordinate of the end of the ref line
+float y2_desired = 0; // Desired y coordinate of the end of the ref line
+static float traction_setpoint; // Desired traction
+static float steering_delta;    // Desired steering angle
+float steering_max = 120.0f;     // Maximum steering angle
+float steering_min = 0.0f;     // Minimum steering angle
+
 
 osThreadId_t Handle_Task_Traction;
 osThreadId_t Handle_Task_Steering;
 osThreadId_t Handle_Task_StateMachine;
 osThreadId_t Handle_Task_UART;
 osThreadId_t Handle_Task_MPU9250;
+osThreadId_t Handle_Task_Stanley;
 
 const osThreadAttr_t Attributes_Task_Traction = {
   .name = "Action_TractionSetpoint",
@@ -144,16 +130,17 @@ const osThreadAttr_t Attributes_Task_UART = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 
-// MPU9250 Thread
 const osThreadAttr_t Attributes_Task_MPU9250 = {
   .name = "Task_MPU9250",
   .stack_size = 128 * 8,
   .priority = (osPriority_t) osPriorityHigh,
 };
 
-
-static float traction_setpoint;
-static float delta_steering;
+const osThreadAttr_t Attributes_Task_Stanley = {
+  .name = "Task_Stanley",
+  .stack_size = 128 * 8,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 
 /* USER CODE END PV */
 
@@ -174,6 +161,7 @@ void Function_Task_Steering(void *argument);
 void Function_Task_StateMachine(void *argument);
 void Function_Task_UART(void *argument);
 void Function_Task_MPU9250(void *argument);
+void Function_Task_Stanley(void *argument);
 void calibrate_MPU9250(SPI_HandleTypeDef *spi);
 void initDoubleLinkedList(struct doubleLinkedList* list[], int n);
 /* USER CODE END PFP */
@@ -253,19 +241,6 @@ Error_Handler();
   /* USER CODE BEGIN 2 */
   printf("Initializing MPU...\r\n");
 
-
-
-    /*//Danny
-
-    mpu.hspi = &hspi3;
-    mpu.cs_gpio_port = SPI3_CS_GPIO_Port;
-    mpu.cs_gpio_pin  = SPI3_CS_Pin;
-
-    mpu9250_set_accel_resolution(&mpu, ACCEL_RESOLUTION_8G);
-    mpu9250_set_gyro_resolution( &mpu, GYRO_RESOLUTION_2000DPS);
-
-    mpu.mag_resolution =  (10.0 * 4912.0 / 8190.0);*/
-
   for (int i = 0; i < 3; i++) {
     DBLL_init(&gyro_list[i], n_window);
     DBLL_init(&acce_list[i], n_window);
@@ -273,18 +248,10 @@ Error_Handler();
   }
 
   MPU9250_Init(&mpu);
-  //printf("Calibrating MPU...\r\n");
   calibrate_MPU9250(&MPU_SPI);
-  /*printf("Calibration complete!\r\n");
-  printf("Calibration offsets:\r\n");
-  printf("Accel: %.2f %.2f %.2f\r\n", AccOffset[0], AccOffset[1], AccOffset[2]);
-  printf("Gyro: %.2f %.2f %.2f\r\n", GyroOffset[0], GyroOffset[1], GyroOffset[2]);
-  printf("Mag: %.2f %.2f %.2f\r\n", MagOffset[0], MagOffset[1], MagOffset[2]);*/
   HAL_Delay(2000);
-
-
-  //MPU9250_Init();
-
+  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+  for(int i = 0; i < 4; i++){HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin); HAL_Delay(20);}
 
   printf("PreeRTOS\r\n");
 
@@ -315,16 +282,12 @@ Error_Handler();
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
-  //float *arg = malloc(sizeof(float));
-  /*arg = 0.75f;
-  //float starting_traction = 0.75;
-  //Handle_Task_Traction = osThreadNew(Function_Task_Traction, (void *)arg, &Attributes_Task_Traction);
-   */
   Handle_Task_Steering     = osThreadNew(Function_Task_Steering, NULL, &Attributes_Task_Steering);
   Handle_Task_Traction     = osThreadNew(Function_Task_Traction, NULL, &Attributes_Task_Traction);
   Handle_Task_StateMachine = osThreadNew(Function_Task_StateMachine, NULL, &Attributes_Task_StateMachine);
   Handle_Task_UART         = osThreadNew(Function_Task_UART, NULL, &Attributes_Task_UART);
   Handle_Task_MPU9250      = osThreadNew(Function_Task_MPU9250, NULL, &Attributes_Task_MPU9250);
+  //Handle_Task_Stanley       = osThreadNew(Function_Task_Stanley, NULL, &Attributes_Task_Stanley);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -516,7 +479,8 @@ static void MX_TIM13_Init(void)
 
   TIM13->ARR = 63999;
   TIM13->PSC = 74;
-  TIM13->CCR1 = (uint32_t)(63999*0.5);
+  TIM13->CCR1 = (uint32_t)(63999*0.075);
+  traction_setpoint = 0.5f;
   HAL_TIM_PWM_Start(&htim13, TIM_CHANNEL_1);
 
   /* USER CODE END TIM13_Init 2 */
@@ -568,6 +532,7 @@ static void MX_TIM14_Init(void)
   TIM14->ARR = 63999;
   TIM14->PSC = 74;
   TIM14->CCR1 = (uint32_t)(63999*0.075);
+  steering_delta = 0.5f;
   HAL_TIM_PWM_Start(&htim14, TIM_CHANNEL_1);
   HAL_Delay(40);
 
@@ -723,15 +688,13 @@ static void MX_GPIO_Init(void)
 void Function_Task_Traction(void *argument){
   for(;;){
     TIM14->CCR1 = (uint32_t)((63999*0.05)+(63999*0.05*traction_setpoint));
-    //printf("Traction: %f\r\n", traction_setpoint);
     osDelay(50);
   }
 }
 
 void Function_Task_Steering(void *argument){
     for(;;){
-      TIM13->CCR1 = (uint32_t)((63999*0.05)+(63999*0.05*delta_steering));
-      //printf("Steering: %f\r\n", delta_steering);
+      TIM13->CCR1 = (uint32_t)((63999*0.05)+(63999*0.05*steering_delta));
       osDelay(50);
     }
 }
@@ -740,21 +703,21 @@ void Function_Task_StateMachine(void *argument){
   uint8_t state = 0;
   for(;;){
     if(state == 0){
-        delta_steering = 0.5f;
+        steering_delta = 0.5f;
         traction_setpoint = 0.70f;
         HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
         osDelay(3000);
         state = 1;
       }else if(state == 1){
-        delta_steering = 0.75f;
+        steering_delta = 0.75f;
         traction_setpoint = 0.20f;
         HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
         osDelay(3000);
-        delta_steering = 0.25f;
+        steering_delta = 0.25f;
         osDelay(3000);
         state = 2;
       }else if(state == 2){
-        delta_steering = 0.5f;
+        steering_delta = 0.5f;
         traction_setpoint = 0.70f;
         HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
         osDelay(3000);
@@ -765,12 +728,33 @@ void Function_Task_StateMachine(void *argument){
   }
 }
 
+void Function_Task_Stanley(void *argument){
+  // Gains
+  float k = 1.0f;
+  float ks = 0.0f;
+  
+  float local_x = 0.1f;
+  float local_y = 0.1f;
+
+  float cte = 0.0f;
+
+  for(;;){
+    //cte = (x2_desired - x1_desired)*(y - y1_desired) - (y2_desired - y1_desired)*(x - x1_desired); // Calculate cross track
+    cte = (x2_desired - x1_desired)*(local_y - y1_desired) - (y2_desired - y1_desired)*(local_x - x1_desired); // Calculate cross track
+    steering_delta = psi + ((180.0/M_PI) * (atan2f(k*cte, ks + u))); // Calculate steering with radian conversion
+    steering_delta = (steering_delta > steering_max) ? steering_max : (steering_delta < steering_min) ? steering_min : steering_delta; // Evil steering limiting
+
+    //printf("cte: %.3f\r\n", cte);
+
+    osDelay(100);
+  }
+}
+
 void Function_Task_UART(void *argument){
-
-double angAcc = 0, angGyro = 0, angPond = 0, time_sample = 0.05, alpha = 0.1;
-char bt_msg[100];
-	for(;;){
-
+  double angAcc = 0, angGyro = 0, angPond = 0, time_sample = 0.05, alpha = 0.1;
+  char bt_msg[100];
+  float cte2;
+  for(;;){
     HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
     //printf("Hello World!\r\n");
     /*printf("Accel: %.2f %.2f %.2f\r\n", mpu.accel_x, mpu.accel_y, mpu.accel_z);
@@ -782,11 +766,20 @@ char bt_msg[100];
     /*printf("Accel: %.3f %.3f %.3f\r\n", AccData[0], AccData[1], AccData[2]);
     printf("Gyro: %.3f %.3f %.3f\r\n", GyroData[0], GyroData[1], GyroData[2]);
     printf("Mag: %.3f %.3f %.3ff\r\n", MagData[0], MagData[1],MagData[2]);*/
-    printf("%.3f %.3f %.3f", acce_list[0].mean, acce_list[1].mean, acce_list[2].mean);
-    printf(" %.3f %.3f %.3f", gyro_list[0].mean, gyro_list[1].mean, gyro_list[2].mean);
-    printf("%.3f %.3f %.3f\r\n", mag_list[0].mean, mag_list[1].mean,mag_list[2].mean);
-    printf("Robot angle: %.3f\r\n", robot_angle);
 
+    //printf("%.3f %.3f %.3f", acce_list[0].mean, acce_list[1].mean, acce_list[2].mean);
+    //printf(" %.3f %.3f %.3f", gyro_list[0].mean, gyro_list[1].mean, gyro_list[2].mean);
+    //printf("%.3f %.3f %.3f\r\n", mag_list[0].mean, mag_list[1].mean,mag_list[2].mean);
+
+
+
+    printf("Stanley Steering: %.3f\r\n", steering_delta);
+    printf("State: X:%.3f Y:%.3f U:%.3f V:%.3f Psi:%.3f\r\n", x, y, u, v, psi);
+
+
+
+    //cte2 = (x2_desired - x1_desired)*(y - y1_desired) - (y2_desired - y1_desired)*(x - x1_desired);
+    //printf("cte2: %.3f\r\n", cte2);
    
 
     /*angAcc = (180*atan((acce_list[1].mean/acce_list[0].mean)))/ (M_PI);
@@ -799,7 +792,7 @@ char bt_msg[100];
     //printf("%.3f %.3f %.3f\r\n",angPond, angAcc, angGyro);
 
      // print to bluetooth huart1
-    sprintf(bt_msg, "Robot angle: %.3f\r\n", robot_angle);
+    sprintf(bt_msg, "Robot angle: %.3f\r\n", psi);
     HAL_UART_Transmit(&huart1, (uint8_t*)bt_msg, strlen(bt_msg), 100);
 
     osDelay(50);
@@ -817,20 +810,20 @@ void Function_Task_MPU9250(void *argument){
 	elapsed_time = HAL_GetTick() - prevtime;
 	// update robot angle with gyro
 	if (abs(gyro_list[2].mean) > 1){
-		robot_angle += (gyro_list[2].mean * elapsed_time/1000) / 4;
+		psi += (gyro_list[2].mean * elapsed_time/1000) / 4;
 	}
 
   // update position with accel
 
   if (abs(acce_list[0].mean) > 1){
-    imu_vel_x += (acce_list[0].mean * elapsed_time/1000);
+    u += (acce_list[0].mean * elapsed_time/1000);
   }
   if (abs(acce_list[1].mean) > 1){
-    imu_vel_y += (acce_list[1].mean * elapsed_time/1000);
+    v += (acce_list[1].mean * elapsed_time/1000);
   }
 
-  imu_pos_x += imu_vel_x * elapsed_time/1000;
-  imu_pos_y += imu_vel_y * elapsed_time/1000;
+  x += u * elapsed_time/1000;
+  y += v * elapsed_time/1000;
 
     // printf("Elapsed time: %d\r\n", elapsed_time);
     
@@ -939,7 +932,7 @@ void StartDefaultTask(void *argument)
   for(;;){
 	  osDelay(3000);
 	  *traction_setpoint = setpoint;
-    delta_steering = delta;
+    steering_delta = delta;
 	  setpoint -= 0.1f;
 	  delta -= 0.1f;
   
