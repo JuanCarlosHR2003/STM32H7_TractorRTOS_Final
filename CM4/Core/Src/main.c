@@ -114,12 +114,12 @@ char myAckPayload[32] = "Ack by STMF7!";
 FDCAN_FilterTypeDef sFilterConfig;
 FDCAN_TxHeaderTypeDef TxHeader;
 FDCAN_RxHeaderTypeDef RxHeader;
-uint8_t *const RxData[8] = (uint8_t *)0x30000000;
+uint8_t *const RxData = (uint8_t *)0x30000000;
 osMutexId_t *const mutex_id_CAN = (osMutexId_t *)0x3000000C;
 osMutexId_t *const mutex_id_Wireless = (osMutexId_t *)0x3000001C;
-uint16_t *const x = (uint8_t *)0x30000030;
-uint16_t *const y = (uint8_t *)0x30000040;
-uint16_t *const z = (uint8_t *)0x30000050;
+uint16_t *const x = (uint16_t *)0x30000030;
+uint16_t *const y = (uint16_t *)0x30000040;
+uint16_t *const z = (uint16_t *)0x30000050;
 /* USER CODE END 0 */
 
 /**
@@ -477,9 +477,9 @@ void Function_Task_Wireless(void *argument){
 	for(;;){
     NRF24_read(myRxData, 32);
     osMutexAcquire(mutex_id_Wireless, 1000);
-    x = ((uint16_t)myRxData[0] <<8) | (uint16_t)myRxData[1];
-    y = ((uint16_t)myRxData[2] <<8) | (uint16_t)myRxData[3];
-	z = ((uint16_t)myRxData[4] <<8) | (uint16_t)myRxData[5];
+    *x = ((uint16_t)myRxData[0] <<8) | (uint16_t)myRxData[1];
+    *y = ((uint16_t)myRxData[2] <<8) | (uint16_t)myRxData[3];
+	*z = ((uint16_t)myRxData[4] <<8) | (uint16_t)myRxData[5];
     osMutexRelease(mutex_id_Wireless);
 
 	printf("X: %u, Y: %u, °:%u\r\n", x, y,z);

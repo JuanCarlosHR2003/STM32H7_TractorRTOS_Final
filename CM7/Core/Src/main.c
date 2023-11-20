@@ -99,7 +99,9 @@ mpu9250_t mpu;*/ //Desertkun
 struct doubleLinkedList gyro_list[3];
 struct doubleLinkedList acce_list[3];
 struct doubleLinkedList mag_list[3];
-int n_window = 25;
+int n_window = 10;
+
+float robot_angle = 0.0;
 
 uint8_t ak8963_WhoAmI = 0;
 uint8_t mpu9250_WhoAmI = 0;
@@ -720,71 +722,87 @@ double angAcc = 0, angGyro = 0, angPond = 0, time_sample = 0.05, alpha = 0.1;
     /*printf("Accel: %.3f %.3f %.3f\r\n", AccData[0], AccData[1], AccData[2]);
     printf("Gyro: %.3f %.3f %.3f\r\n", GyroData[0], GyroData[1], GyroData[2]);
     printf("Mag: %.3f %.3f %.3ff\r\n", MagData[0], MagData[1],MagData[2]);*/
-    //printf("%.3f %.3f %.3f", acce_list[0].mean, acce_list[1].mean, acce_list[2].mean);
-    //printf(" %.3f %.3f %.3f", gyro_list[0].mean, gyro_list[1].mean, gyro_list[2].mean);
-    //printf("%.3f %.3f %.3f\r\n", mag_list[0].mean, mag_list[1].mean,mag_list[2].mean);
+    printf("%.3f %.3f %.3f", acce_list[0].mean, acce_list[1].mean, acce_list[2].mean);
+    printf(" %.3f %.3f %.3f", gyro_list[0].mean, gyro_list[1].mean, gyro_list[2].mean);
+    printf("%.3f %.3f %.3f\r\n", mag_list[0].mean, mag_list[1].mean,mag_list[2].mean);
+    printf("Robot angle: %.3f\r\n", robot_angle);
 
-    angAcc = (180*atan((acce_list[1].mean/acce_list[0].mean)))/ (M_PI);
+    /*angAcc = (180*atan((acce_list[1].mean/acce_list[0].mean)))/ (M_PI);
     angGyro = (gyro_list[0].mean * time_sample) + angPond;
-    angPond = (angAcc * alpha) + (angGyro * (1 - alpha));
+    angPond = (angAcc * alpha) + (angGyro * (1 - alpha));*/
 
     //angPond = (angPond < 0) ? angPond + 360.0 : (angPond > 360.0) ? angPond - 360.0 : angPond;
 
 
-    printf("%.3f %.3f %.3f\r\n",angPond, angAcc, angGyro);
+    //printf("%.3f %.3f %.3f\r\n",angPond, angAcc, angGyro);
     osDelay(50);
   }
 }
 
 void Function_Task_MPU9250(void *argument){
+  float time_sample_s = 0.05; uint32_t prevtime = 0; uint32_t elapsed_time;
   for(;;){
 
+    // wait until time sample is reached
+    //while (HAL_GetTick() - prevtime < time_sample_s * 1000);
 
-	//mpu9250_update_accel_gyro(&mpu);
+    // print elapsed time
+	elapsed_time = HAL_GetTick() - prevtime;
+	// update robot angle with gyro
+	if (abs(gyro_list[2].mean) > 1){
+		robot_angle += (gyro_list[2].mean * elapsed_time/1000) / 4;
+	}
+    // printf("Elapsed time: %d\r\n", elapsed_time);
+    
+    prevtime = HAL_GetTick();
 
-
-	/*MPU9250_GetData(AccData, GyroData, MagData);
-
-	mpu.accel_x = AccData[0];
-	mpu.accel_y = AccData[1];
-	mpu.accel_z = AccData[2];
-	mpu.gyro_x = GyroData[0];
-	mpu.gyro_y = GyroData[1];
-	mpu.gyro_z = GyroData[2];
-	mpu.mag_x = MagData[0];
-	mpu.mag_y = MagData[1];
-	mpu.mag_z = MagData[2];*/
-
-	ak8963_WhoAmI = mpu_r_ak8963_WhoAmI(&mpu);
-	mpu9250_WhoAmI = mpu_r_WhoAmI(&mpu);
-	MPU9250_ReadAccel(&mpu);
-	MPU9250_ReadGyro(&mpu);
-	MPU9250_ReadMag(&mpu);
-
-	  push_back(&acce_list[0], mpu.mpu_data.Accel[0] - AccOffset[0]);
-	  push_back(&acce_list[1], mpu.mpu_data.Accel[1] - AccOffset[1]);
-	  push_back(&acce_list[2], mpu.mpu_data.Accel[2] - AccOffset[2]);
-	  push_back(&gyro_list[0], mpu.mpu_data.Gyro[0] - GyroOffset[0]);
-	  push_back(&gyro_list[1], mpu.mpu_data.Gyro[1] - GyroOffset[1]);
-	  push_back(&gyro_list[2], mpu.mpu_data.Gyro[2] - GyroOffset[2]);
-	  //push_back(&mag_list[0], mpu.mpu_data.Magn[0] - MagOffset[0]);
-	  //push_back(&mag_list[1], mpu.mpu_data.Magn[1] - MagOffset[1]);
-	  //push_back(&mag_list[2], mpu.mpu_data.Magn[2] - MagOffset[2]);
+		//mpu9250_update_accel_gyro(&mpu);
 
 
-  /*
-	AccData[0] = mpu.mpu_data.Accel[0] - AccOffset[0];
-  AccData[1] = mpu.mpu_data.Accel[1] - AccOffset[1];
-  AccData[2] = mpu.mpu_data.Accel[2] - AccOffset[2];
-  GyroData[0] = mpu.mpu_data.Gyro[0] - GyroOffset[0];
-  GyroData[1] = mpu.mpu_data.Gyro[1] - GyroOffset[1];
-  GyroData[2] = mpu.mpu_data.Gyro[2] - GyroOffset[2];
-  MagData[0] = mpu.mpu_data.Magn[0] - MagOffset[0];
-  MagData[1] = mpu.mpu_data.Magn[1] - MagOffset[1];
-  MagData[2] = mpu.mpu_data.Magn[2] - MagOffset[2];
-  */
+		/*MPU9250_GetData(AccData, GyroData, MagData);
 
-  osDelay(50);
+		mpu.accel_x = AccData[0];
+		mpu.accel_y = AccData[1];
+		mpu.accel_z = AccData[2];
+		mpu.gyro_x = GyroData[0];
+		mpu.gyro_y = GyroData[1];
+		mpu.gyro_z = GyroData[2];
+		mpu.mag_x = MagData[0];
+		mpu.mag_y = MagData[1];
+		mpu.mag_z = MagData[2];*/
+
+		ak8963_WhoAmI = mpu_r_ak8963_WhoAmI(&mpu);
+		mpu9250_WhoAmI = mpu_r_WhoAmI(&mpu);
+		MPU9250_ReadAccel(&mpu);
+		MPU9250_ReadGyro(&mpu);
+		MPU9250_ReadMag(&mpu);
+
+		push_back(&acce_list[0], mpu.mpu_data.Accel[0] - AccOffset[0]);
+		push_back(&acce_list[1], mpu.mpu_data.Accel[1] - AccOffset[1]);
+		push_back(&acce_list[2], mpu.mpu_data.Accel[2] - AccOffset[2]);
+		push_back(&gyro_list[0], mpu.mpu_data.Gyro[0] - GyroOffset[0]);
+		push_back(&gyro_list[1], mpu.mpu_data.Gyro[1] - GyroOffset[1]);
+		push_back(&gyro_list[2], mpu.mpu_data.Gyro[2] - GyroOffset[2]);
+		//push_back(&mag_list[0], mpu.mpu_data.Magn[0] - MagOffset[0]);
+		//push_back(&mag_list[1], mpu.mpu_data.Magn[1] - MagOffset[1]);
+		//push_back(&mag_list[2], mpu.mpu_data.Magn[2] - MagOffset[2]);
+    
+		/*
+		AccData[0] = mpu.mpu_data.Accel[0] - AccOffset[0];
+		AccData[1] = mpu.mpu_data.Accel[1] - AccOffset[1];
+		AccData[2] = mpu.mpu_data.Accel[2] - AccOffset[2];
+		GyroData[0] = mpu.mpu_data.Gyro[0] - GyroOffset[0];
+		GyroData[1] = mpu.mpu_data.Gyro[1] - GyroOffset[1];
+		GyroData[2] = mpu.mpu_data.Gyro[2] - GyroOffset[2];
+		MagData[0] = mpu.mpu_data.Magn[0] - MagOffset[0];
+		MagData[1] = mpu.mpu_data.Magn[1] - MagOffset[1];
+		MagData[2] = mpu.mpu_data.Magn[2] - MagOffset[2];
+		*/
+
+		uint32_t os_delay = time_sample_s*1000 - (HAL_GetTick() - prevtime);
+
+		osDelay(os_delay);
+    
   }
 }
 
