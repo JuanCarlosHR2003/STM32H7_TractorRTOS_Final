@@ -27,6 +27,7 @@
 //#include "MPU9250.h"
 #include "mpu9250.h"
 #include "doublyLinkedList.h"
+#include "stdbool.h"
 
 /* USER CODE END Includes */
 
@@ -56,7 +57,6 @@ SPI_HandleTypeDef hspi3;
 TIM_HandleTypeDef htim13;
 TIM_HandleTypeDef htim14;
 
-UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
 
 /* Definitions for defaultTask */
@@ -100,15 +100,26 @@ mpu9250_t mpu;*/ //Desertkun
 struct doubleLinkedList gyro_list[3];
 struct doubleLinkedList acce_list[3];
 struct doubleLinkedList mag_list[3];
-int n_window = 10;
+int n_window = 25;
 
-float robot_angle = 0.0;
+uint16_t xW = 0;
+uint16_t yW = 0;
+uint16_t angW = 0;
 
-float imu_pos_x = 0.0;
-float imu_pos_y = 0.0;
-
-float imu_vel_x = 0.0;
-float imu_vel_y = 0.0;
+uint8_t *const RxData = (uint8_t *)0x30000000;
+//uint8_t RxData[8];
+osMutexId_t *const mutex_id_CAN = (osMutexId_t *)0x3000000C;
+osMutexId_t *const mutex_id_Wireless = (osMutexId_t *)0x3000001C;
+uint16_t *const x = (uint16_t *)0x30000030;
+uint16_t *const y = (uint16_t *)0x30000040;
+uint16_t *const z = (uint16_t *)0x30000050;
+bool *const flag = (bool *)0x30000060;
+const osMutexAttr_t Thread_Mutex_attr = {
+  "myThreadMutex",     // human readable mutex name
+  osMutexRecursive,    // attr_bits
+  NULL,                // memory for control block
+  0U                   // size for control block
+};
 
 uint8_t ak8963_WhoAmI = 0;
 uint8_t mpu9250_WhoAmI = 0;
@@ -119,6 +130,7 @@ osThreadId_t Handle_Task_Steering;
 osThreadId_t Handle_Task_StateMachine;
 osThreadId_t Handle_Task_UART;
 osThreadId_t Handle_Task_MPU9250;
+osThreadId_t Handle_Task_SharedMem;
 
 const osThreadAttr_t Attributes_Task_Traction = {
   .name = "Action_TractionSetpoint",
@@ -151,6 +163,13 @@ const osThreadAttr_t Attributes_Task_MPU9250 = {
   .priority = (osPriority_t) osPriorityHigh,
 };
 
+// Shared Memory Thread
+const osThreadAttr_t Attributes_Task_SharedMem = {
+  .name = "Task_SharedMem",
+  .stack_size = 128 * 8,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+
 
 static float traction_setpoint;
 static float delta_steering;
@@ -165,7 +184,6 @@ static void MX_USART3_UART_Init(void);
 static void MX_TIM14_Init(void);
 static void MX_TIM13_Init(void);
 static void MX_SPI3_Init(void);
-static void MX_USART1_UART_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
@@ -174,6 +192,7 @@ void Function_Task_Steering(void *argument);
 void Function_Task_StateMachine(void *argument);
 void Function_Task_UART(void *argument);
 void Function_Task_MPU9250(void *argument);
+void Function_Task_SharedMem(void *argument);
 void calibrate_MPU9250(SPI_HandleTypeDef *spi);
 void initDoubleLinkedList(struct doubleLinkedList* list[], int n);
 /* USER CODE END PFP */
@@ -249,7 +268,6 @@ Error_Handler();
   MX_TIM14_Init();
   MX_TIM13_Init();
   MX_SPI3_Init();
-  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   printf("Initializing MPU...\r\n");
 
@@ -295,6 +313,8 @@ Error_Handler();
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
+  *mutex_id_Wireless = osMutexNew(&Thread_Mutex_attr);
+  *mutex_id_CAN = osMutexNew(&Thread_Mutex_attr);
   /* USER CODE END RTOS_MUTEX */
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
@@ -325,6 +345,7 @@ Error_Handler();
   Handle_Task_StateMachine = osThreadNew(Function_Task_StateMachine, NULL, &Attributes_Task_StateMachine);
   Handle_Task_UART         = osThreadNew(Function_Task_UART, NULL, &Attributes_Task_UART);
   Handle_Task_MPU9250      = osThreadNew(Function_Task_MPU9250, NULL, &Attributes_Task_MPU9250);
+  Handle_Task_SharedMem      = osThreadNew(Function_Task_SharedMem, NULL, &Attributes_Task_SharedMem);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -516,7 +537,7 @@ static void MX_TIM13_Init(void)
 
   TIM13->ARR = 63999;
   TIM13->PSC = 74;
-  TIM13->CCR1 = (uint32_t)(63999*0.5);
+  TIM13->CCR1 = (uint32_t)(63999*0.15);
   HAL_TIM_PWM_Start(&htim13, TIM_CHANNEL_1);
 
   /* USER CODE END TIM13_Init 2 */
@@ -567,61 +588,11 @@ static void MX_TIM14_Init(void)
 
   TIM14->ARR = 63999;
   TIM14->PSC = 74;
-  TIM14->CCR1 = (uint32_t)(63999*0.075);
+  TIM14->CCR1 = (uint32_t)(63999*0.15);
   HAL_TIM_PWM_Start(&htim14, TIM_CHANNEL_1);
-  HAL_Delay(40);
-
 
   /* USER CODE END TIM14_Init 2 */
   HAL_TIM_MspPostInit(&htim14);
-
-}
-
-/**
-  * @brief USART1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART1_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART1_Init 0 */
-
-  /* USER CODE END USART1_Init 0 */
-
-  /* USER CODE BEGIN USART1_Init 1 */
-
-  /* USER CODE END USART1_Init 1 */
-  huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
-  huart1.Init.WordLength = UART_WORDLENGTH_8B;
-  huart1.Init.StopBits = UART_STOPBITS_1;
-  huart1.Init.Parity = UART_PARITY_NONE;
-  huart1.Init.Mode = UART_MODE_TX_RX;
-  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART1_Init 2 */
-
-  /* USER CODE END USART1_Init 2 */
 
 }
 
@@ -722,7 +693,7 @@ static void MX_GPIO_Init(void)
 
 void Function_Task_Traction(void *argument){
   for(;;){
-    TIM14->CCR1 = (uint32_t)((63999*0.05)+(63999*0.05*traction_setpoint));
+    TIM14->CCR1 = (uint32_t)(63999*traction_setpoint);
     //printf("Traction: %f\r\n", traction_setpoint);
     osDelay(50);
   }
@@ -732,7 +703,7 @@ void Function_Task_Steering(void *argument){
     for(;;){
       TIM13->CCR1 = (uint32_t)((63999*0.05)+(63999*0.05*delta_steering));
       //printf("Steering: %f\r\n", delta_steering);
-      osDelay(50);
+      osDelay(100);
     }
 }
 
@@ -741,22 +712,22 @@ void Function_Task_StateMachine(void *argument){
   for(;;){
     if(state == 0){
         delta_steering = 0.5f;
-        traction_setpoint = 0.70f;
-        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-        osDelay(3000);
+        traction_setpoint = 0.5f;
+        HAL_GPIO_WritePin(H_IN_1_GPIO_Port, H_IN_1_Pin, GPIO_PIN_RESET);
+        osDelay(5000);
         state = 1;
       }else if(state == 1){
         delta_steering = 0.75f;
-        traction_setpoint = 0.20f;
-        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(H_IN_1_GPIO_Port, H_IN_1_Pin, GPIO_PIN_SET);
         osDelay(3000);
         delta_steering = 0.25f;
         osDelay(3000);
         state = 2;
       }else if(state == 2){
         delta_steering = 0.5f;
-        traction_setpoint = 0.70f;
-        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(H_IN_1_GPIO_Port, H_IN_1_Pin, GPIO_PIN_RESET);
+        osDelay(5000);
+        HAL_GPIO_WritePin(H_IN_1_GPIO_Port, H_IN_1_Pin, GPIO_PIN_SET);
         osDelay(3000);
         state = 0;
       }else{
@@ -768,7 +739,6 @@ void Function_Task_StateMachine(void *argument){
 void Function_Task_UART(void *argument){
 
 double angAcc = 0, angGyro = 0, angPond = 0, time_sample = 0.05, alpha = 0.1;
-char bt_msg[100];
 	for(;;){
 
     HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
@@ -782,108 +752,85 @@ char bt_msg[100];
     /*printf("Accel: %.3f %.3f %.3f\r\n", AccData[0], AccData[1], AccData[2]);
     printf("Gyro: %.3f %.3f %.3f\r\n", GyroData[0], GyroData[1], GyroData[2]);
     printf("Mag: %.3f %.3f %.3ff\r\n", MagData[0], MagData[1],MagData[2]);*/
-    printf("%.3f %.3f %.3f", acce_list[0].mean, acce_list[1].mean, acce_list[2].mean);
-    printf(" %.3f %.3f %.3f", gyro_list[0].mean, gyro_list[1].mean, gyro_list[2].mean);
-    printf("%.3f %.3f %.3f\r\n", mag_list[0].mean, mag_list[1].mean,mag_list[2].mean);
-    printf("Robot angle: %.3f\r\n", robot_angle);
-
-   
+    //printf("%.3f %.3f %.3f", acce_list[0].mean, acce_list[1].mean, acce_list[2].mean);
+    //printf(" %.3f %.3f %.3f", gyro_list[0].mean, gyro_list[1].mean, gyro_list[2].mean);
+    //printf("%.3f %.3f %.3f\r\n", mag_list[0].mean, mag_list[1].mean,mag_list[2].mean);
 
     /*angAcc = (180*atan((acce_list[1].mean/acce_list[0].mean)))/ (M_PI);
     angGyro = (gyro_list[0].mean * time_sample) + angPond;
-    angPond = (angAcc * alpha) + (angGyro * (1 - alpha));*/
+    angPond = (angAcc * alpha) + (angGyro * (1 - alpha));
 
     //angPond = (angPond < 0) ? angPond + 360.0 : (angPond > 360.0) ? angPond - 360.0 : angPond;
 
 
-    //printf("%.3f %.3f %.3f\r\n",angPond, angAcc, angGyro);
-
-     // print to bluetooth huart1
-    sprintf(bt_msg, "Robot angle: %.3f\r\n", robot_angle);
-    HAL_UART_Transmit(&huart1, (uint8_t*)bt_msg, strlen(bt_msg), 100);
-
+    printf("%.3f %.3f %.3f\r\n",angPond, angAcc, angGyro);*/
     osDelay(50);
   }
 }
 
 void Function_Task_MPU9250(void *argument){
-  float time_sample_s = 0.05; uint32_t prevtime = 0; uint32_t elapsed_time;
   for(;;){
 
-    // wait until time sample is reached
-    //while (HAL_GetTick() - prevtime < time_sample_s * 1000);
 
-    // print elapsed time
-	elapsed_time = HAL_GetTick() - prevtime;
-	// update robot angle with gyro
-	if (abs(gyro_list[2].mean) > 1){
-		robot_angle += (gyro_list[2].mean * elapsed_time/1000) / 4;
+	//mpu9250_update_accel_gyro(&mpu);
+
+
+	/*MPU9250_GetData(AccData, GyroData, MagData);
+
+	mpu.accel_x = AccData[0];
+	mpu.accel_y = AccData[1];
+	mpu.accel_z = AccData[2];
+	mpu.gyro_x = GyroData[0];
+	mpu.gyro_y = GyroData[1];
+	mpu.gyro_z = GyroData[2];
+	mpu.mag_x = MagData[0];
+	mpu.mag_y = MagData[1];
+	mpu.mag_z = MagData[2];*/
+
+	ak8963_WhoAmI = mpu_r_ak8963_WhoAmI(&mpu);
+	mpu9250_WhoAmI = mpu_r_WhoAmI(&mpu);
+	MPU9250_ReadAccel(&mpu);
+	MPU9250_ReadGyro(&mpu);
+	MPU9250_ReadMag(&mpu);
+
+	  push_back(&acce_list[0], mpu.mpu_data.Accel[0] - AccOffset[0]);
+	  push_back(&acce_list[1], mpu.mpu_data.Accel[1] - AccOffset[1]);
+	  push_back(&acce_list[2], mpu.mpu_data.Accel[2] - AccOffset[2]);
+	  push_back(&gyro_list[0], mpu.mpu_data.Gyro[0] - GyroOffset[0]);
+	  push_back(&gyro_list[1], mpu.mpu_data.Gyro[1] - GyroOffset[1]);
+	  push_back(&gyro_list[2], mpu.mpu_data.Gyro[2] - GyroOffset[2]);
+	  //push_back(&mag_list[0], mpu.mpu_data.Magn[0] - MagOffset[0]);
+	  //push_back(&mag_list[1], mpu.mpu_data.Magn[1] - MagOffset[1]);
+	  //push_back(&mag_list[2], mpu.mpu_data.Magn[2] - MagOffset[2]);
+
+
+  /*
+	AccData[0] = mpu.mpu_data.Accel[0] - AccOffset[0];
+  AccData[1] = mpu.mpu_data.Accel[1] - AccOffset[1];
+  AccData[2] = mpu.mpu_data.Accel[2] - AccOffset[2];
+  GyroData[0] = mpu.mpu_data.Gyro[0] - GyroOffset[0];
+  GyroData[1] = mpu.mpu_data.Gyro[1] - GyroOffset[1];
+  GyroData[2] = mpu.mpu_data.Gyro[2] - GyroOffset[2];
+  MagData[0] = mpu.mpu_data.Magn[0] - MagOffset[0];
+  MagData[1] = mpu.mpu_data.Magn[1] - MagOffset[1];
+  MagData[2] = mpu.mpu_data.Magn[2] - MagOffset[2];
+  */
+
+  osDelay(50);
+  }
+}
+
+void Function_Task_SharedMem(void *argument){
+	bool flagW = false;
+	for(;;){
+		printf("%u %u %u\r\n", *x,*y,*z);
+
+		for(int i = 0; i < 4; i++){
+			printf("%lx ", RxData[i]);
+		}
+		printf("\r\n");
+	osDelay(50);
 	}
-
-  // update position with accel
-
-  if (abs(acce_list[0].mean) > 1){
-    imu_vel_x += (acce_list[0].mean * elapsed_time/1000);
-  }
-  if (abs(acce_list[1].mean) > 1){
-    imu_vel_y += (acce_list[1].mean * elapsed_time/1000);
-  }
-
-  imu_pos_x += imu_vel_x * elapsed_time/1000;
-  imu_pos_y += imu_vel_y * elapsed_time/1000;
-
-    // printf("Elapsed time: %d\r\n", elapsed_time);
-    
-    prevtime = HAL_GetTick();
-
-		//mpu9250_update_accel_gyro(&mpu);
-
-
-		/*MPU9250_GetData(AccData, GyroData, MagData);
-
-		mpu.accel_x = AccData[0];
-		mpu.accel_y = AccData[1];
-		mpu.accel_z = AccData[2];
-		mpu.gyro_x = GyroData[0];
-		mpu.gyro_y = GyroData[1];
-		mpu.gyro_z = GyroData[2];
-		mpu.mag_x = MagData[0];
-		mpu.mag_y = MagData[1];
-		mpu.mag_z = MagData[2];*/
-
-		ak8963_WhoAmI = mpu_r_ak8963_WhoAmI(&mpu);
-		mpu9250_WhoAmI = mpu_r_WhoAmI(&mpu);
-		MPU9250_ReadAccel(&mpu);
-		MPU9250_ReadGyro(&mpu);
-		MPU9250_ReadMag(&mpu);
-
-		push_back(&acce_list[0], mpu.mpu_data.Accel[0] - AccOffset[0]);
-		push_back(&acce_list[1], mpu.mpu_data.Accel[1] - AccOffset[1]);
-		push_back(&acce_list[2], mpu.mpu_data.Accel[2] - AccOffset[2]);
-		push_back(&gyro_list[0], mpu.mpu_data.Gyro[0] - GyroOffset[0]);
-		push_back(&gyro_list[1], mpu.mpu_data.Gyro[1] - GyroOffset[1]);
-		push_back(&gyro_list[2], mpu.mpu_data.Gyro[2] - GyroOffset[2]);
-		//push_back(&mag_list[0], mpu.mpu_data.Magn[0] - MagOffset[0]);
-		//push_back(&mag_list[1], mpu.mpu_data.Magn[1] - MagOffset[1]);
-		//push_back(&mag_list[2], mpu.mpu_data.Magn[2] - MagOffset[2]);
-    
-		/*
-		AccData[0] = mpu.mpu_data.Accel[0] - AccOffset[0];
-		AccData[1] = mpu.mpu_data.Accel[1] - AccOffset[1];
-		AccData[2] = mpu.mpu_data.Accel[2] - AccOffset[2];
-		GyroData[0] = mpu.mpu_data.Gyro[0] - GyroOffset[0];
-		GyroData[1] = mpu.mpu_data.Gyro[1] - GyroOffset[1];
-		GyroData[2] = mpu.mpu_data.Gyro[2] - GyroOffset[2];
-		MagData[0] = mpu.mpu_data.Magn[0] - MagOffset[0];
-		MagData[1] = mpu.mpu_data.Magn[1] - MagOffset[1];
-		MagData[2] = mpu.mpu_data.Magn[2] - MagOffset[2];
-		*/
-
-		uint32_t os_delay = time_sample_s*1000 - (HAL_GetTick() - prevtime);
-
-		osDelay(os_delay);
-    
-  }
 }
 
 void calibrate_MPU9250(SPI_HandleTypeDef *spi){
