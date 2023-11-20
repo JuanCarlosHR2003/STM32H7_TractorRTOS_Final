@@ -56,6 +56,7 @@ SPI_HandleTypeDef hspi3;
 TIM_HandleTypeDef htim13;
 TIM_HandleTypeDef htim14;
 
+UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
 
 /* Definitions for defaultTask */
@@ -102,6 +103,12 @@ struct doubleLinkedList mag_list[3];
 int n_window = 10;
 
 float robot_angle = 0.0;
+
+float imu_pos_x = 0.0;
+float imu_pos_y = 0.0;
+
+float imu_vel_x = 0.0;
+float imu_vel_y = 0.0;
 
 uint8_t ak8963_WhoAmI = 0;
 uint8_t mpu9250_WhoAmI = 0;
@@ -158,6 +165,7 @@ static void MX_USART3_UART_Init(void);
 static void MX_TIM14_Init(void);
 static void MX_TIM13_Init(void);
 static void MX_SPI3_Init(void);
+static void MX_USART1_UART_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
@@ -241,6 +249,7 @@ Error_Handler();
   MX_TIM14_Init();
   MX_TIM13_Init();
   MX_SPI3_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   printf("Initializing MPU...\r\n");
 
@@ -507,7 +516,7 @@ static void MX_TIM13_Init(void)
 
   TIM13->ARR = 63999;
   TIM13->PSC = 74;
-  TIM13->CCR1 = (uint32_t)(63999*0.15);
+  TIM13->CCR1 = (uint32_t)(63999*0.5);
   HAL_TIM_PWM_Start(&htim13, TIM_CHANNEL_1);
 
   /* USER CODE END TIM13_Init 2 */
@@ -558,11 +567,61 @@ static void MX_TIM14_Init(void)
 
   TIM14->ARR = 63999;
   TIM14->PSC = 74;
-  TIM14->CCR1 = (uint32_t)(63999*0.15);
+  TIM14->CCR1 = (uint32_t)(63999*0.075);
   HAL_TIM_PWM_Start(&htim14, TIM_CHANNEL_1);
+  HAL_Delay(40);
+
 
   /* USER CODE END TIM14_Init 2 */
   HAL_TIM_MspPostInit(&htim14);
+
+}
+
+/**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
 
 }
 
@@ -663,7 +722,7 @@ static void MX_GPIO_Init(void)
 
 void Function_Task_Traction(void *argument){
   for(;;){
-    TIM14->CCR1 = (uint32_t)(63999*traction_setpoint);
+    TIM14->CCR1 = (uint32_t)((63999*0.05)+(63999*0.05*traction_setpoint));
     //printf("Traction: %f\r\n", traction_setpoint);
     osDelay(50);
   }
@@ -673,7 +732,7 @@ void Function_Task_Steering(void *argument){
     for(;;){
       TIM13->CCR1 = (uint32_t)((63999*0.05)+(63999*0.05*delta_steering));
       //printf("Steering: %f\r\n", delta_steering);
-      osDelay(100);
+      osDelay(50);
     }
 }
 
@@ -682,22 +741,22 @@ void Function_Task_StateMachine(void *argument){
   for(;;){
     if(state == 0){
         delta_steering = 0.5f;
-        traction_setpoint = 0.5f;
-        HAL_GPIO_WritePin(H_IN_1_GPIO_Port, H_IN_1_Pin, GPIO_PIN_RESET);
-        osDelay(5000);
+        traction_setpoint = 0.70f;
+        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+        osDelay(3000);
         state = 1;
       }else if(state == 1){
         delta_steering = 0.75f;
-        HAL_GPIO_WritePin(H_IN_1_GPIO_Port, H_IN_1_Pin, GPIO_PIN_SET);
+        traction_setpoint = 0.20f;
+        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
         osDelay(3000);
         delta_steering = 0.25f;
         osDelay(3000);
         state = 2;
       }else if(state == 2){
         delta_steering = 0.5f;
-        HAL_GPIO_WritePin(H_IN_1_GPIO_Port, H_IN_1_Pin, GPIO_PIN_RESET);
-        osDelay(5000);
-        HAL_GPIO_WritePin(H_IN_1_GPIO_Port, H_IN_1_Pin, GPIO_PIN_SET);
+        traction_setpoint = 0.70f;
+        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
         osDelay(3000);
         state = 0;
       }else{
@@ -709,6 +768,7 @@ void Function_Task_StateMachine(void *argument){
 void Function_Task_UART(void *argument){
 
 double angAcc = 0, angGyro = 0, angPond = 0, time_sample = 0.05, alpha = 0.1;
+char bt_msg[100];
 	for(;;){
 
     HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
@@ -727,6 +787,8 @@ double angAcc = 0, angGyro = 0, angPond = 0, time_sample = 0.05, alpha = 0.1;
     printf("%.3f %.3f %.3f\r\n", mag_list[0].mean, mag_list[1].mean,mag_list[2].mean);
     printf("Robot angle: %.3f\r\n", robot_angle);
 
+   
+
     /*angAcc = (180*atan((acce_list[1].mean/acce_list[0].mean)))/ (M_PI);
     angGyro = (gyro_list[0].mean * time_sample) + angPond;
     angPond = (angAcc * alpha) + (angGyro * (1 - alpha));*/
@@ -735,6 +797,11 @@ double angAcc = 0, angGyro = 0, angPond = 0, time_sample = 0.05, alpha = 0.1;
 
 
     //printf("%.3f %.3f %.3f\r\n",angPond, angAcc, angGyro);
+
+     // print to bluetooth huart1
+    sprintf(bt_msg, "Robot angle: %.3f\r\n", robot_angle);
+    HAL_UART_Transmit(&huart1, (uint8_t*)bt_msg, strlen(bt_msg), 100);
+
     osDelay(50);
   }
 }
@@ -752,6 +819,19 @@ void Function_Task_MPU9250(void *argument){
 	if (abs(gyro_list[2].mean) > 1){
 		robot_angle += (gyro_list[2].mean * elapsed_time/1000) / 4;
 	}
+
+  // update position with accel
+
+  if (abs(acce_list[0].mean) > 1){
+    imu_vel_x += (acce_list[0].mean * elapsed_time/1000);
+  }
+  if (abs(acce_list[1].mean) > 1){
+    imu_vel_y += (acce_list[1].mean * elapsed_time/1000);
+  }
+
+  imu_pos_x += imu_vel_x * elapsed_time/1000;
+  imu_pos_y += imu_vel_y * elapsed_time/1000;
+
     // printf("Elapsed time: %d\r\n", elapsed_time);
     
     prevtime = HAL_GetTick();
