@@ -102,20 +102,20 @@ struct doubleLinkedList acce_list[3];
 struct doubleLinkedList mag_list[3];
 int n_window = 10;
 
-uint8_t *const RxData = (uint8_t *)0x30000000;
-//uint8_t RxData[8];
-osMutexId_t *const mutex_id_CAN = (osMutexId_t *)0x3000000C;
-osMutexId_t *const mutex_id_Wireless = (osMutexId_t *)0x3000001C;
+union bytes_to_float{
+	uint8_t val_arr[sizeof(float)];
+	float val;
+};
+union bytes_to_float *float_bytes = (union bytes_to_float *)0x30000000;
+
+/*float_bytes.val_arr[0] = 0,
+float_bytes.val_arr[1] = 0,
+float_bytes.val_arr[2] = 0,
+float_bytes.val_arr[3] = 0;*/
 uint16_t *const x = (uint16_t *)0x30000030;
 uint16_t *const y = (uint16_t *)0x30000040;
 uint16_t *const z = (uint16_t *)0x30000050;
 bool *const flag = (bool *)0x30000060;
-const osMutexAttr_t Thread_Mutex_attr = {
-  "myThreadMutex",     // human readable mutex name
-  osMutexRecursive,    // attr_bits
-  NULL,                // memory for control block
-  0U                   // size for control block
-};
 
 float robot_angle = 0.0;
 
@@ -215,6 +215,10 @@ void initDoubleLinkedList(struct doubleLinkedList* list[], int n);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+	float_bytes->val_arr[0] = 0;
+	float_bytes->val_arr[1] = 0;
+	float_bytes->val_arr[2] = 0;
+	float_bytes->val_arr[3] = 0;
 
   /* USER CODE END 1 */
 /* USER CODE BEGIN Boot_Mode_Sequence_0 */
@@ -320,8 +324,6 @@ Error_Handler();
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
-  *mutex_id_Wireless = osMutexNew(&Thread_Mutex_attr);
-    *mutex_id_CAN = osMutexNew(&Thread_Mutex_attr);
   /* USER CODE END RTOS_MUTEX */
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
@@ -956,10 +958,7 @@ void Function_Task_SharedMem(void *argument){
 	for(;;){
 		printf("%u %u %u\r\n", *x,*y,*z);
 
-		for(int i = 0; i < 4; i++){
-			printf("%lx ", RxData[i]);
-		}
-		printf("\r\n");
+		printf("%f\r\n", float_bytes->val);
 	osDelay(50);
 	}
 }

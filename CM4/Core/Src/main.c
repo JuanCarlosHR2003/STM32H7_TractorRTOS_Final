@@ -114,10 +114,14 @@ char myAckPayload[32] = "Ack by STMF7!";
 FDCAN_FilterTypeDef sFilterConfig;
 FDCAN_TxHeaderTypeDef TxHeader;
 FDCAN_RxHeaderTypeDef RxHeader;
-uint8_t *const RxData = (uint8_t *)0x30000000;
-//uint8_t RxData[8];
-osMutexId_t *const mutex_id_CAN = (osMutexId_t *)0x3000000C;
-osMutexId_t *const mutex_id_Wireless = (osMutexId_t *)0x3000001C;
+//uint8_t *const RxData = (uint8_t *)0x30000000;
+uint8_t RxData[8];
+
+union bytes_to_float{
+	uint8_t val_arr[sizeof(float)];
+	float val;
+};
+union bytes_to_float *float_bytes = (union bytes_to_float *)0x30000000;
 uint16_t *const x = (uint16_t *)0x30000030;
 uint16_t *const y = (uint16_t *)0x30000040;
 uint16_t *const z = (uint16_t *)0x30000050;
@@ -509,6 +513,10 @@ void Function_Task_Wireless(void *argument){
 void Function_Task_CAN(void *argument){
 	for(;;){
 			while (HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK);
+			for(uint8_t i = 0; i < sizeof(float); i++){
+				float_bytes->val_arr[i] = RxData[i];
+			}
+
 					/*printf("\n\rCAN1 ID: %lx [%d]   ", RxHeader.Identifier, RxHeader.DataLength/65536);
 					for(int i = 0; i < RxHeader.DataLength/65536; i++){
 						printf("%lx ", RxData[i]);
