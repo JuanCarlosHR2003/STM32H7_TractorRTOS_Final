@@ -587,7 +587,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
+  huart1.Init.BaudRate = 9600;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -820,6 +820,7 @@ void Function_Task_UART(void *argument){
   double angAcc = 0, angGyro = 0, angPond = 0, time_sample = 0.05, alpha = 0.1;
   char bt_msg[100];
   float cte2;
+  uint8_t nbytes;
   for(;;){
     HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
     //printf("Hello World!\r\n");
@@ -858,8 +859,8 @@ void Function_Task_UART(void *argument){
     //printf("%.3f %.3f %.3f\r\n",angPond, angAcc, angGyro);
 
      // print to bluetooth huart1
-    sprintf(bt_msg, "Robot angle: %.3f\r\n", psi);
-    HAL_UART_Transmit(&huart1, (uint8_t*)bt_msg, strlen(bt_msg), 100);
+    nbytes = sprintf(bt_msg, "Robot angle: %.3f\r\n", psi);
+    HAL_UART_Transmit(&huart1, (uint8_t*)bt_msg, nbytes, 100);
 
     osDelay(50);
   }
